@@ -1,0 +1,17 @@
+[package]
+name = "rust_i2c"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nix = { version = "0.29.*", features = ["ioctl"] }
+
+# Specify the library target
+[lib]
+name = "rust_i2c"
+path = "lib.rs"  # Location of the library code
+
+# Specify the binary target
+[[bin]]
+name = "main-app"
+path = "main.rs"  # Location of the binary's main function
