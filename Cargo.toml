@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 nix = { version = "0.29.*", features = ["ioctl"] }
+sysfs_gpio = "0.6.*"
+signal = "0.7.*"
 
 # Specify the library target
 [lib]
@@ -13,5 +15,9 @@ path = "lib.rs"  # Location of the library code
 
 # Specify the binary target
 [[bin]]
-name = "main-app"
-path = "main.rs"  # Location of the binary's main function
+name = "gy-521"
+path = "gy-521.rs"  # Location of the binary's main function
+
+[[bin]]
+name = "mpr121-keypad"
+path = "mpr121-keypad.rs"  # Location of the binary's main function
