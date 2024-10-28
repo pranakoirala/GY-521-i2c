@@ -1,64 +1,69 @@
 use rust_i2c::I2CDevice;
-use std::io::{self};
-use sysfs_gpio::{Pin, Direction, Edge};
+use sysfs_gpio::{Direction, Edge, Pin, PinPoller};
+use std::error::Error;
 
 const KEYPAD_I2C_PATH: &str = "/dev/i2c-1"; // Update to the correct I2C bus
 const KEYPAD_ADDRESS: u8 = 0x5a; // Keypad I2C address
 const INTERRUPT_PIN: u64 = 516; // GPIO pin for interrupt (in raspberry PI4B, update for your board)
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize I2C device for MPR121
-    let mut mpr121 = I2CDevice::new(KEYPAD_I2C_PATH, KEYPAD_ADDRESS)?;
+struct MPR121 {
+    dev: I2CDevice,
+    pin_poller: PinPoller,
+}
 
-    // Configure the MPR121 (enable electrodes and set thresholds)
-    configure_mpr121(&mut mpr121)?;
+impl MPR121 {
+    pub fn new(i2c_dev_path: &str, dev_addr: u8, interrupt_pin_num: u64) -> Result<Self, Box<dyn Error>> {
+        let mut dev = I2CDevice::new(&i2c_dev_path, dev_addr)?;
+        
+        // Set touch and release thresholds for all electrodes
+        for electrode in 0..12 {
+            dev.write(&[0x41 + electrode * 2, 12])?; // Touch threshold
+            dev.write(&[0x42 + electrode * 2, 6])?;  // Release threshold
+        }
 
-    println!("Waiting for touch input...");
+        // Enable all 12 electrodes by writing to the ELE_CFG register
+        dev.write(&[0x5E, 0x0C])?; // 0x0C enables electrodes 0-11
 
-    // Set up the interrupt pin
-    let interrupt_pin = Pin::new(INTERRUPT_PIN);
-    interrupt_pin.with_exported(|| {
-        interrupt_pin.set_direction(Direction::In)?;
+        // Set up the interrupt pin
+        let interrupt_pin = Pin::new(interrupt_pin_num);
+        interrupt_pin.export()?;
+        interrupt_pin.set_direction(Direction::Out)?;
         interrupt_pin.set_edge(Edge::BothEdges)?;
-        let mut poller = interrupt_pin.get_poller()?;
+        
+        // Set up poller for the interrupt pin
+        let pin_poller = interrupt_pin.get_poller()?;
+        Ok(Self {dev, pin_poller})
+    }
 
-        loop {
-            match poller.poll(1000)? {
-                Some(_) => {
-                    if let Err(e) = read_touch_status(&mut mpr121) {
-                        eprintln!("Error reading touch status: {}", e);
+    /// Reads the touch status (2 bytes) from the MPR121.
+    pub fn check_touch(&mut self) -> Result<u16, Box<dyn Error>> {
+        // Poll for 1000 milliseconds
+        match self.pin_poller.poll(1000)? {
+            Some(_) => {
+                let data = self.dev.read_registers(0x00, 2)?; // Read TOUCH_STATUS_L and H
+                let status = u16::from(data[0]) | (u16::from(data[1]) << 8); // Combine the bytes
+                for i in 0..12 {
+                    if status & (1 << i) != 0 {
+                        return Ok(i); 
                     }
                 }
-                None => {
-                }
             }
-            
+            None => {
+            }
         }
-    })?;
-
-    Ok(())
+        Err("Touch not detected".into())
+    }
 }
 
-/// Configures the MPR121 sensor by writing to necessary registers.
-fn configure_mpr121(mpr121: &mut I2CDevice) -> io::Result<()> {
-    // Set touch and release thresholds for all electrodes
-    for electrode in 0..12 {
-        mpr121.write(&[0x41 + electrode * 2, 12])?; // Touch threshold
-        mpr121.write(&[0x42 + electrode * 2, 6])?;  // Release threshold
-    }
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut sensor = MPR121::new(KEYPAD_I2C_PATH, KEYPAD_ADDRESS, INTERRUPT_PIN)?;
 
-    // Enable all 12 electrodes by writing to the ELE_CFG register
-    mpr121.write(&[0x5E, 0x0C]) // 0x0C enables electrodes 0-11
-}
+    println!("Waiting for touch input ...");
 
-/// Reads the touch status (2 bytes) from the MPR121.
-fn read_touch_status(mpr121: &mut I2CDevice) -> io::Result<()> {
-    let data = mpr121.read_registers(0x00, 2)?; // Read TOUCH_STATUS_L and H
-    let status = u16::from(data[0]) | (u16::from(data[1]) << 8); // Combine the bytes
-    for i in 0..12 {
-        if status & (1 << i) != 0 {
-            println!("Key {} touched!", i);
+    loop {
+        match sensor.check_touch() {
+            Ok(val) => println!("Key: {} touched", val),
+            Err(e) => println!("{}", e)
         }
     }
-    Ok(())
 }

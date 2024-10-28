@@ -24,3 +24,7 @@ path = "bin/mpr121-keypad.rs"
 [[bin]]
 name = "hc-sr04"
 path = "bin/hc-sr04.rs" 
+
+[[bin]]
+name = "hc-sr501"
+path = "bin/hc-sr501.rs" 
